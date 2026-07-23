@@ -22,7 +22,7 @@ const optionalDate = z.preprocess((val) => {
 const formSchema = z.object({
     id: z.string().optional(),
     patient_identifier: z.string().min(1, "Ingrese el ID del paciente"),
-    date_of_birth: z.date({
+    date_of_birth: z.coerce.date({
         required_error: "Ingrese la fecha de nacimiento",
         invalid_type_error: "Fecha inválida",
     }),
@@ -34,8 +34,9 @@ const formSchema = z.object({
     lateralidad: requiredEnum(["Izquierda", "Derecha", "Bilateral"], "la lateralidad"),
     histological_type: requiredEnum(["Ductal Infiltrante", "Lobulillar Infiltrante", "Otros"], "el tipo histológico"),
     tumor_grade: requiredEnum(["G1", "G2", "G3"], "el grado histológico"),
-    c_t: requiredEnum(["T1", "T2", "T3", "T4"], "el cT"),
-    c_n: requiredEnum(["N0", "N1", "N2", "N3"], "el cN"),
+    c_t: requiredEnum(["Tx", "T1", "T2", "T3", "T4"], "el cT"),
+    c_n: requiredEnum(["Nx", "N0", "N1", "N2", "N3"], "el cN"),
+    positive_nodes_ge_4: requiredEnum(["Sí", "No"], "la afectación ganglionar de 4 o más"),
     clinical_stage: requiredEnum(["I", "IIA", "IIB", "IIIA", "IIIB", "IIIC"], "el estadio clínico"),
     er_percent: z.coerce
         .number({ invalid_type_error: "Ingrese el porcentaje" })
@@ -54,10 +55,10 @@ const formSchema = z.object({
         .min(0, "Mínimo 0%")
         .max(100, "Máximo 100%"),
     molecular_subtype: requiredEnum(
-        ["Luminal A-like", "Luminal B-like (HER2 negativo)", "Luminal B-like (HER2 positivo)", "HER2-enriquecido (RE/RP negativo)", "Triple Negativo"],
+        ["Luminal A-like", "Luminal B-like (HER2 negativo)", "Luminal B-like (HER2 positivo)", "HER2-enriquecido (RE/RP negativo)", "HER2-low", "Triple Negativo"],
         "el subtipo molecular"
     ),
-    neoadjuvant_scheme: requiredEnum(["Antraciclinas + Taxanos", "Solo Taxanos", "Otros"], "el esquema"),
+    neoadjuvant_scheme: z.string().min(1, "Especifique el esquema utilizado"),
     neoadjuvant_completion_date: optionalDate,
     directed_therapy: z.string().optional(),
     completed_cycles: z.coerce
@@ -67,11 +68,11 @@ const formSchema = z.object({
     toxicity_reason: z.string().optional(),
     surgery_type: requiredEnum(["Conservadora", "Mastectomía"], "el tipo de cirugía"),
     axillary_management: requiredEnum(["Ganglio Centinela", "Disección Axilar"], "el manejo axilar"),
-    yp_t: requiredEnum(["T0", "Tis", "T1", "T2", "T3", "T4"], "el ypT"),
-    yp_n: requiredEnum(["N0", "N1", "N2", "N3"], "el ypN"),
+    yp_t: requiredEnum(["ypT0", "ypTis", "ypT1mi", "ypT1a", "ypT1b", "ypT1c", "ypT2", "ypT3", "ypT4"], "el ypT"),
+    yp_n: requiredEnum(["ypN0", "ypN0(i+)", "ypN0(mol+)", "ypN1mi", "ypN1a", "ypN1b", "ypN1c", "ypN2a", "ypN2b", "ypN3a", "ypN3b", "ypN3c"], "el ypN"),
     pcr_achieved: z.boolean(),
     rcb_class: requiredEnum(["Clase 0", "Clase I", "Clase II", "Clase III"], "la clase RCB"),
-    surgery_date: z.date({
+    surgery_date: z.coerce.date({
         required_error: "Ingrese la fecha de cirugía",
         invalid_type_error: "Fecha inválida",
     }),
@@ -257,20 +258,29 @@ export default function FormularioPCR() {
     const toxicitySuspension = watch("toxicity_suspension")
     const pcrAchieved = watch("pcr_achieved")
 
+    const c_t_watch = watch("c_t");
+    const yp_t_watch = watch("yp_t");
+    const nodes_watch = watch("positive_nodes_ge_4");
+    const lvi_watch = watch("lymphovascular_invasion");
+    const grade_watch = watch("tumor_grade");
+    const age_watch = watch("age_at_diagnosis");
+
+    const isHighRisk = 
+        c_t_watch === "T3" || c_t_watch === "T4" ||
+        yp_t_watch === "T3" || yp_t_watch === "T4" ||
+        nodes_watch === "Sí" ||
+        lvi_watch === "Sí" ||
+        grade_watch === "G3" ||
+        (age_watch !== undefined && Number(age_watch) > 0 && Number(age_watch) < 50);
+
     // ===== TEST DATA FILL =====
     function fillTestData() {
         const randomId = `TEST-${Math.floor(Math.random() * 90000) + 10000}`
 
-        // Date strings in YYYY-MM-DD format for HTML date inputs
-        const dateOfBirth = "1985-06-15"
-        const neoDate = "2025-01-15"
-        const surgDate = "2025-03-01"
-        const contactDate = "2025-12-01"
-
-        // Reset non-date fields first (dates set as any for the reset call)
+        // Reset with string values so HTML date inputs display correctly
         const testValues = {
             patient_identifier: randomId,
-            date_of_birth: dateOfBirth as any,
+            date_of_birth: "1985-06-15",
             age_at_diagnosis: 39,
             menopausal_status: "Pre-menopáusico" as const,
             lateralidad: "Derecha" as const,
@@ -278,6 +288,7 @@ export default function FormularioPCR() {
             tumor_grade: "G2" as const,
             c_t: "T2" as const,
             c_n: "N1" as const,
+            positive_nodes_ge_4: "No" as const,
             clinical_stage: "IIB" as const,
             lymphovascular_invasion: "Sí" as const,
             er_percent: 85,
@@ -285,8 +296,8 @@ export default function FormularioPCR() {
             her2: "0" as const,
             ki67_percent: 25,
             molecular_subtype: "Luminal A-like" as const,
-            neoadjuvant_scheme: "Antraciclinas + Taxanos" as const,
-            neoadjuvant_completion_date: neoDate as any,
+            neoadjuvant_scheme: "Antraciclinas + Taxanos",
+            neoadjuvant_completion_date: "2025-01-15",
             directed_therapy: "",
             completed_cycles: 6,
             toxicity_suspension: false,
@@ -296,21 +307,17 @@ export default function FormularioPCR() {
             yp_n: "N0" as const,
             pcr_achieved: false,
             rcb_class: "Clase II" as const,
-            surgery_date: surgDate as any,
+            surgery_date: "2025-03-01",
             adjuvant_treatment: "Radioterapia + Hormonoterapia",
             current_status: "Vivo sin enfermedad" as const,
-            last_contact_date: contactDate as any,
+            last_contact_date: "2025-12-01",
+            recurrence_date: "",
+            death_date: "",
             cause_of_death: "No aplica" as const,
         }
-        // Reset sets display values (strings) for HTML date inputs
+        
+        // Let reset handle all string/number fields. The native date inputs expect YYYY-MM-DD
         reset(testValues as any)
-        // Now set Date objects so Zod validation passes on submit
-        setTimeout(() => {
-            setValue("date_of_birth", new Date(dateOfBirth + "T12:00:00"))
-            setValue("neoadjuvant_completion_date", new Date(neoDate + "T12:00:00"))
-            setValue("surgery_date", new Date(surgDate + "T12:00:00"))
-            setValue("last_contact_date", new Date(contactDate + "T12:00:00"))
-        }, 0)
     }
 
     // Scroll to first error on submit
@@ -344,6 +351,8 @@ export default function FormularioPCR() {
             adjuvant_treatment: values.adjuvant_treatment || null,
             toxicity_reason: values.toxicity_reason || null,
             lymphovascular_invasion: values.lymphovascular_invasion,
+            positive_nodes_ge_4: values.positive_nodes_ge_4 === "Sí",
+            high_relapse_risk: isHighRisk,
         }
 
         try {
@@ -488,7 +497,7 @@ export default function FormularioPCR() {
                         </div>
                         <div data-field-error={!!errors.date_of_birth || undefined}>
                             <Field label="Fecha de Nacimiento" error={errors.date_of_birth?.message} required>
-                                <input type="date" {...register("date_of_birth", { valueAsDate: true })} style={getInputStyle(!!errors.date_of_birth)} />
+                                <input type="date" {...register("date_of_birth")} style={getInputStyle(!!errors.date_of_birth)} />
                             </Field>
                         </div>
                         <div data-field-error={!!errors.age_at_diagnosis || undefined}>
@@ -547,7 +556,7 @@ export default function FormularioPCR() {
                             <Field label="cT" error={errors.c_t?.message} required>
                                 <select {...register("c_t")} style={getSelectStyle(!!errors.c_t)}>
                                     <option value="">Selecc.</option>
-                                    <option value="T1">T1</option><option value="T2">T2</option><option value="T3">T3</option><option value="T4">T4</option>
+                                    <option value="Tx">Tx</option><option value="T1">T1</option><option value="T2">T2</option><option value="T3">T3</option><option value="T4">T4</option>
                                 </select>
                             </Field>
                         </div>
@@ -555,7 +564,16 @@ export default function FormularioPCR() {
                             <Field label="cN" error={errors.c_n?.message} required>
                                 <select {...register("c_n")} style={getSelectStyle(!!errors.c_n)}>
                                     <option value="">Selecc.</option>
-                                    <option value="N0">N0</option><option value="N1">N1</option><option value="N2">N2</option><option value="N3">N3</option>
+                                    <option value="Nx">Nx</option><option value="N0">N0</option><option value="N1">N1</option><option value="N2">N2</option><option value="N3">N3</option>
+                                </select>
+                            </Field>
+                        </div>
+                        <div data-field-error={!!errors.positive_nodes_ge_4 || undefined}>
+                            <Field label="¿Afectación de ≥ 4 ganglios?" error={errors.positive_nodes_ge_4?.message} required>
+                                <select {...register("positive_nodes_ge_4")} style={getSelectStyle(!!errors.positive_nodes_ge_4)}>
+                                    <option value="">Selecc.</option>
+                                    <option value="Sí">Sí</option>
+                                    <option value="No">No</option>
                                 </select>
                             </Field>
                         </div>
@@ -631,6 +649,7 @@ export default function FormularioPCR() {
                                     <option value="Luminal B-like (HER2 negativo)">Luminal B-like (HER2 neg)</option>
                                     <option value="Luminal B-like (HER2 positivo)">Luminal B-like (HER2 pos)</option>
                                     <option value="HER2-enriquecido (RE/RP negativo)">HER2-enriquecido</option>
+                                    <option value="HER2-low">HER2-low</option>
                                     <option value="Triple Negativo">Triple Negativo</option>
                                 </select>
                             </Field>
@@ -647,16 +666,11 @@ export default function FormularioPCR() {
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "1rem" }}>
                         <div data-field-error={!!errors.neoadjuvant_scheme || undefined}>
                             <Field label="Esquema Utilizado" error={errors.neoadjuvant_scheme?.message} required>
-                                <select {...register("neoadjuvant_scheme")} style={getSelectStyle(!!errors.neoadjuvant_scheme)}>
-                                    <option value="">Seleccionar...</option>
-                                    <option value="Antraciclinas + Taxanos">Antraciclinas + Taxanos</option>
-                                    <option value="Solo Taxanos">Solo Taxanos</option>
-                                    <option value="Otros">Otros</option>
-                                </select>
+                                <input type="text" {...register("neoadjuvant_scheme")} placeholder="Ej: Antraciclinas + Taxanos" style={getInputStyle(!!errors.neoadjuvant_scheme)} />
                             </Field>
                         </div>
                         <Field label="Fecha de Fin Neoadyuvancia" error={errors.neoadjuvant_completion_date?.message}>
-                            <input type="date" {...register("neoadjuvant_completion_date", { valueAsDate: true })} style={getInputStyle(!!errors.neoadjuvant_completion_date)} />
+                            <input type="date" {...register("neoadjuvant_completion_date")} style={getInputStyle(!!errors.neoadjuvant_completion_date)} />
                         </Field>
                         <Field label="Terapia Dirigida (si aplica)">
                             <input {...register("directed_therapy")} placeholder="Trastuzumab, Pertuzumab, Inmunoterapia..." style={getInputStyle(false)} />
@@ -727,8 +741,8 @@ export default function FormularioPCR() {
                                     onChange={(e) => {
                                         setValue("pcr_achieved", e.target.checked)
                                         if (e.target.checked) {
-                                            setValue("yp_t", "T0")
-                                            setValue("yp_n", "N0")
+                                            setValue("yp_t", "ypT0")
+                                            setValue("yp_n", "ypN0")
                                         }
                                     }}
                                     style={{ width: "1.1rem", height: "1.1rem", accentColor: "#e4769a" }}
@@ -741,8 +755,9 @@ export default function FormularioPCR() {
                                 <Field label="ypT" error={errors.yp_t?.message} required>
                                     <select {...register("yp_t")} style={getSelectStyle(!!errors.yp_t)}>
                                         <option value="">Selecc.</option>
-                                        <option value="T0">T0</option><option value="Tis">Tis</option><option value="T1">T1</option>
-                                        <option value="T2">T2</option><option value="T3">T3</option><option value="T4">T4</option>
+                                        <option value="ypT0">ypT0</option><option value="ypTis">ypTis</option><option value="ypT1mi">ypT1mi</option>
+                                        <option value="ypT1a">ypT1a</option><option value="ypT1b">ypT1b</option><option value="ypT1c">ypT1c</option>
+                                        <option value="ypT2">ypT2</option><option value="ypT3">ypT3</option><option value="ypT4">ypT4</option>
                                     </select>
                                 </Field>
                             </div>
@@ -750,7 +765,10 @@ export default function FormularioPCR() {
                                 <Field label="ypN" error={errors.yp_n?.message} required>
                                     <select {...register("yp_n")} style={getSelectStyle(!!errors.yp_n)}>
                                         <option value="">Selecc.</option>
-                                        <option value="N0">N0</option><option value="N1">N1</option><option value="N2">N2</option><option value="N3">N3</option>
+                                        <option value="ypN0">ypN0</option><option value="ypN0(i+)">ypN0(i+)</option><option value="ypN0(mol+)">ypN0(mol+)</option>
+                                        <option value="ypN1mi">ypN1mi</option><option value="ypN1a">ypN1a</option><option value="ypN1b">ypN1b</option><option value="ypN1c">ypN1c</option>
+                                        <option value="ypN2a">ypN2a</option><option value="ypN2b">ypN2b</option>
+                                        <option value="ypN3a">ypN3a</option><option value="ypN3b">ypN3b</option><option value="ypN3c">ypN3c</option>
                                     </select>
                                 </Field>
                             </div>
@@ -776,7 +794,7 @@ export default function FormularioPCR() {
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "1rem" }}>
                         <div data-field-error={!!errors.surgery_date || undefined}>
                             <Field label="Fecha de la Cirugía" error={errors.surgery_date?.message} required>
-                                <input type="date" {...register("surgery_date", { valueAsDate: true })} style={getInputStyle(!!errors.surgery_date)} />
+                                <input type="date" {...register("surgery_date")} style={getInputStyle(!!errors.surgery_date)} />
                             </Field>
                         </div>
                         <Field label="Tratamiento Adyuvante Recibido">
@@ -811,13 +829,13 @@ export default function FormularioPCR() {
 
                     <div style={{ marginTop: "1.25rem", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "1rem" }}>
                         <Field label="Fecha de Último Contacto">
-                            <input type="date" {...register("last_contact_date", { valueAsDate: true })} style={getInputStyle(false)} />
+                            <input type="date" {...register("last_contact_date")} style={getInputStyle(false)} />
                         </Field>
                         <Field label="Fecha de Recurrencia (si aplica)">
-                            <input type="date" {...register("recurrence_date", { valueAsDate: true })} style={getInputStyle(false)} />
+                            <input type="date" {...register("recurrence_date")} style={getInputStyle(false)} />
                         </Field>
                         <Field label="Fecha de Defunción (si aplica)">
-                            <input type="date" {...register("death_date", { valueAsDate: true })} style={getInputStyle(false)} />
+                            <input type="date" {...register("death_date")} style={getInputStyle(false)} />
                         </Field>
                         <Field label="Causa de Muerte" error={errors.cause_of_death?.message}>
                             <select {...register("cause_of_death")} style={getSelectStyle(!!errors.cause_of_death)}>
@@ -830,6 +848,34 @@ export default function FormularioPCR() {
                         </Field>
                     </div>
                 </div>
+
+                {/* ===== ALTO RIESGO ===== */}
+                {isHighRisk && (
+                    <div className="animate-fade-in-up" style={{
+                        background: "rgba(254, 215, 226, 0.9)",
+                        backdropFilter: "blur(8px)",
+                        border: "1px solid #e4769a",
+                        boxShadow: "0 8px 32px 0 rgba(228, 118, 154, 0.2)",
+                        borderRadius: "1rem",
+                        padding: "1.5rem",
+                        marginBottom: "1.5rem",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "1rem"
+                    }}>
+                        <div style={{
+                            width: "3rem", height: "3rem", borderRadius: "50%", background: "#e53e3e", color: "white",
+                            display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.5rem", fontWeight: "bold",
+                            flexShrink: 0
+                        }}>!</div>
+                        <div>
+                            <h3 style={{ margin: 0, color: "#9b2c2c", fontSize: "1.1rem", fontWeight: 700 }}>Paciente de Alto Riesgo Clínico</h3>
+                            <p style={{ margin: "0.25rem 0 0", color: "#8d405b", fontSize: "0.85rem", lineHeight: 1.4 }}>
+                                El paciente cumple con criterios de alto riesgo (como tamaño T3/T4, afectación de ≥4 ganglios, G3, invasión linfovascular o edad menor a 50 años). Este indicador se guardará automáticamente en el registro.
+                            </p>
+                        </div>
+                    </div>
+                )}
 
                 {/* ===== SUBMIT ===== */}
                 <div style={{ display: "flex", justifyContent: "center", paddingTop: "1rem", paddingBottom: "3rem" }}>
